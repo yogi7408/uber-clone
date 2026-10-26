@@ -1,26 +1,64 @@
-﻿# User Registration API
+# Uber Clone Backend
 
-## `POST /users/register`
+Express API and Socket.IO server for the Uber Clone ride-booking application.
 
-Registers a new user, hashes the password, stores the user, and returns an authentication token with the created user.
+## Features
+- User registration, login, profile and logout
+- Captain authentication and vehicle details
+- Captain location updates
+- Location lookup and autocomplete
+- Fare estimation and ride creation
+- Ride confirmation, OTP-based start and completion
+- Real-time ride notifications through Socket.IO
 
-### Request
+## Tech Stack
+- Node.js and Express.js
+- MongoDB and Mongoose
+- JWT authentication
+- bcrypt
+- express-validator
+- Socket.IO
+- OpenStreetMap-based services: Nominatim, Photon and OSRM
 
-Send a JSON body with these fields:
+## Requirements
+- Node.js and npm
+- A reachable MongoDB database
 
-| Field | Type | Required | Rules |
-|---|---|---:|---|
-| `fullName.firstName` | string | Yes | Route validation requires at least 3 characters. |
-| `fullName.lastName` | string | No by route validation | If provided, the model requires at least 2 characters. |
-| `email` | string | Yes | Must be a valid email address; must be unique in the database. |
-| `password` | string | Yes | At least 6 characters. It is hashed before being stored. |
+## Configuration
+Create `backend/.env`:
 
-Example:
-
-```http
-POST /users/register
-Content-Type: application/json
+```env
+MONGO_URI=mongodb://127.0.0.1:27017/uber-clone
+JWT_SECRET=replace-with-a-long-random-secret
+PORT=4000
 ```
+
+`MONGO_URI` and `JWT_SECRET` are required. `PORT` is optional and defaults to `4000`. Keep real credentials out of source control.
+
+## Run Locally
+
+From the repository root, start the backend:
+
+```bash
+cd backend
+npm install
+node server.js
+```
+
+The API and Socket.IO server run on the configured port, normally `http://localhost:4000`. Start the frontend separately and set `VITE_BASE_URL` in `frontend/.env` if the backend is not at that default URL.
+
+## API Endpoints
+Base URL: `http://localhost:4000`. Protected endpoints accept the token in a cookie or an `Authorization` bearer header.
+
+### Users
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| POST | `/users/register` | No | Register a user. Requires `fullName.firstName` (minimum 3 characters), valid `email`, and `password` (minimum 6 characters). |
+| POST | `/users/login` | No | Log in with email and password. |
+| GET | `/users/profile` | User | Get the authenticated user's profile. |
+| GET | `/users/logout` | User | Blacklist the current token and clear the cookie. |
+
+Example user registration body:
 
 ```json
 {
@@ -33,55 +71,69 @@ Content-Type: application/json
 }
 ```
 
-### Responses
+### Captains
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| POST | `/captains/register` | No | Register a captain and vehicle. |
+| POST | `/captains/login` | No | Log in a captain. |
+| GET | `/captains/profile` | Captain | Get the authenticated captain's profile. |
+| PATCH | `/captains/update-location` | Captain | Update latitude (`ltd`) and longitude (`lng`); marks the captain active. |
+| GET | `/captains/logout` | Captain | Blacklist the current token and clear the cookie. |
 
-#### `201 Created`
+Captain registration requires `fullName`, `email`, `password`, and `vehicle` fields (`color`, `plate`, `capacity`, and `vehicleType`). Captain vehicle types are `car`, `motorcycle`, and `auto`.
 
-Registration succeeded. The response includes a signed JWT and the created user document. Because the controller returns the document created by Mongoose directly, its `password` property contains the bcrypt hash (never the submitted plain-text password).
+### Maps
+| Method | Endpoint | Query parameters | Description |
+|---|---|---|---|
+| GET | `/maps/get-coordinates` | `address` | Resolve an address to coordinates. |
+| GET | `/maps/get-distance-time` | `origin`, `destination` | Calculate driving distance and estimated duration. |
+| GET | `/maps/get-suggestions` | `input` | Return location suggestions. |
 
-```json
-{
-  "token": "<jwt-token>",
-  "user": {
-    "fullName": {
-      "firstName": "Avery",
-      "lastName": "Morgan"
-    },
-    "email": "avery@example.com",
-    "_id": "<user-id>"
-  }
-}
+Map endpoints require user authentication. Text parameters must be at least 3 characters long.
+
+### Rides
+| Method | Endpoint | Auth | Parameters |
+|---|---|---|---|
+| POST | `/rides/create` | User | JSON: `pickup`, `destination`, `vehicleType` |
+| GET | `/rides/get-fare` | User | Query: `pickup`, `destination` |
+| POST | `/rides/confirm` | Captain | JSON: `rideId` |
+| GET | `/rides/start-ride` | Captain | Query: `rideId`, `otp` |
+| POST | `/rides/end-ride` | Captain | JSON: `rideId` |
+
+Ride and fare vehicle types are `auto`, `car`, and `moto`. The OTP to start a ride is 6 characters.
+
+## Authentication
+Registration and login return a JWT in the response body; login also sets a `token` cookie. Protected routes accept that cookie or the JWT as a bearer token. JWTs expire after 24 hours, and logout blacklists the presented token.
+
+```http
+Authorization: Bearer <jwt-token>
 ```
 
-#### `400 Bad Request`
+## Socket.IO
 
-One or more route validations failed. The response contains the Express Validator errors:
+Connect to the backend origin, then join as the authenticated account:
 
-```json
-{
-  "errors": [
-    {
-      "type": "field",
-      "msg": "Invalid Email",
-      "path": "email",
-      "location": "body"
-    }
-  ]
-}
+```js
+socket.emit('join', { userId: '<account-id>', userType: 'user' });
 ```
 
-The route returns `400` for invalid email, a first name shorter than 3 characters, or a password shorter than 6 characters. Database or other server errors are passed to Express error handling; no additional status code for those errors is defined in this controller.
+Use `userType: 'captain'` for a captain. The server emits `new-ride` to nearby captains and sends `ride-confirmed`, `ride-started`, and `ride-ended` events to the user.
 
+## Maps and Routing
+- Nominatim for geocoding
+- Photon for autocomplete suggestions
+- OSRM for route distance and estimated duration
 
+These public services do not require an API key in this project and may impose usage limits or availability constraints.
 
-## `GET /`
+## Security
+- Never commit `.env` files.
+- Use a strong JWT secret.
+- Validate requests and protect private routes.
+- Never publish tokens or database credentials.
 
-Returns a plain-text health check response.
+## Testing
+No automated backend test suite is configured yet. Endpoints can be exercised with an API client using the request methods, bodies, query parameters, and authentication described above.
 
-### Response
-
-#### `200 OK`
-
-```text
-Hello, World!
-```
+## License
+No license is specified. Add a LICENSE file if you intend to distribute this project under a particular license.
